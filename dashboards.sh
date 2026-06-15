@@ -9,24 +9,34 @@ set -euo pipefail
 
 HEADLAMP_PORT=8091
 GOLDILOCKS_PORT=8092
+GRAFANA_PORT=8093
+PROMETHEUS_PORT=8094
 
 up() {
   minikube status >/dev/null 2>&1 || minikube start
   echo "Starting port-forwards..."
   pkill -f "port-forward.*svc/headlamp" 2>/dev/null || true
   pkill -f "port-forward.*svc/goldilocks-dashboard" 2>/dev/null || true
+  pkill -f "port-forward.*svc/monitoring-grafana" 2>/dev/null || true
+  pkill -f "port-forward.*svc/monitoring-kube-prometheus-prometheus" 2>/dev/null || true
   sleep 1
-  nohup kubectl -n headlamp   port-forward svc/headlamp           ${HEADLAMP_PORT}:80   >/tmp/headlamp-pf.log   2>&1 &
+  nohup kubectl -n headlamp   port-forward svc/headlamp             ${HEADLAMP_PORT}:80   >/tmp/headlamp-pf.log   2>&1 &
   nohup kubectl -n goldilocks port-forward svc/goldilocks-dashboard ${GOLDILOCKS_PORT}:80 >/tmp/goldilocks-pf.log 2>&1 &
+  nohup kubectl -n monitoring port-forward svc/monitoring-grafana   ${GRAFANA_PORT}:80    >/tmp/grafana-pf.log    2>&1 &
+  nohup kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus ${PROMETHEUS_PORT}:9090 >/tmp/prometheus-pf.log 2>&1 &
   sleep 3
   echo
   echo "  Headlamp   -> http://localhost:${HEADLAMP_PORT}   (paste token from: ./dashboards.sh token)"
   echo "  Goldilocks -> http://localhost:${GOLDILOCKS_PORT}/namespaces"
+  echo "  Grafana    -> http://localhost:${GRAFANA_PORT}   (login: admin / admin)"
+  echo "  Prometheus -> http://localhost:${PROMETHEUS_PORT}"
 }
 
 down() {
   pkill -f "port-forward.*svc/headlamp" 2>/dev/null || true
   pkill -f "port-forward.*svc/goldilocks-dashboard" 2>/dev/null || true
+  pkill -f "port-forward.*svc/monitoring-grafana" 2>/dev/null || true
+  pkill -f "port-forward.*svc/monitoring-kube-prometheus-prometheus" 2>/dev/null || true
   echo "Port-forwards stopped."
 }
 

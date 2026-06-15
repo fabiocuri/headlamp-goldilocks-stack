@@ -9,9 +9,12 @@ open-source web dashboards:
 |------|-------------------|
 | **[Headlamp](https://headlamp.dev/)** (CNCF) | A management dashboard: browse **Workloads / Pods / Services / Ingress**, view **live logs**, see per-pod **CPU / Memory / Network** graphs, and **restart** pods. |
 | **[Goldilocks](https://goldilocks.docs.fairwinds.com/)** (Fairwinds) | A **rightsizing** dashboard: shows **current vs. recommended** CPU/memory requests & limits per workload — the "you asked for X, you really need Y" view. |
+| **[Prometheus + Grafana](https://grafana.com/)** (CNCF) | **Historical** metrics: Prometheus scrapes the cluster (via node-exporter + kube-state-metrics) and Grafana renders rich, time-series **CPU / RAM / network** dashboards going back days — not just the live snapshot. |
 
 Under the hood Goldilocks is powered by the **Vertical Pod Autoscaler (VPA)
-recommender**, and the CPU/RAM numbers come from **metrics-server**.
+recommender**, the live CPU/RAM numbers come from **metrics-server**, and the
+historical dashboards come from **Prometheus** (scraping node-exporter +
+kube-state-metrics) rendered in **Grafana**.
 
 > **Why these two together?** Headlamp answers *"what is my cluster doing right now,
 > and let me act on it"*. Goldilocks answers *"are my resource requests sized
@@ -22,21 +25,23 @@ recommender**, and the CPU/RAM numbers come from **metrics-server**.
 ## How the pieces fit
 
 ```
-        ┌─────────────────────────────────────────────────────┐
-        │                  minikube cluster                    │
-        │                                                      │
-        │   demo namespace        metrics-server (CPU/RAM)     │
-        │   ├─ web-frontend ─┐          │                      │
-        │   ├─ cpu-worker    │          ▼                      │
-        │   └─ log-spitter   │     VPA recommender             │
-        │                    │          │                      │
-        │                    │          ▼                      │
-        │   Headlamp  ◀──────┘     Goldilocks ◀── reads VPA    │
-        │   (reads K8s API)         (rightsizing)              │
-        └───────┬───────────────────────┬─────────────────────┘
-        kubectl port-forward     kubectl port-forward
-                │                        │
-        http://localhost:8091   http://localhost:8092
+   ┌──────────────────────────────────────────────────────────────────┐
+   │                          minikube cluster                          │
+   │                                                                    │
+   │   demo namespace      metrics-server      node-exporter +          │
+   │   ├─ web-frontend ─┐    (live CPU/RAM)     kube-state-metrics       │
+   │   ├─ cpu-worker    │         │                   │                 │
+   │   └─ log-spitter   │         ▼                   ▼                 │
+   │                    │   VPA recommender      Prometheus (scrape+TSDB)│
+   │                    │         │                   │                 │
+   │                    │         ▼                   ▼                 │
+   │   Headlamp  ◀──────┘    Goldilocks          Grafana                │
+   │   (reads K8s API)       (rightsizing)       (historical graphs)    │
+   └──────┬──────────────────┬───────────────────────┬─────────┬───────┘
+     port-forward       port-forward            port-forward  port-forward
+          │                  │                        │           │
+   localhost:8091     localhost:8092          localhost:8093  localhost:8094
+    (Headlamp)         (Goldilocks)              (Grafana)    (Prometheus)
 ```
 
 ---
@@ -64,6 +69,8 @@ Then open:
 
 - **Headlamp** → <http://localhost:8091> — choose **"Token"** and paste the token from `./dashboards.sh token`
 - **Goldilocks** → <http://localhost:8092/namespaces> — click the **`demo`** namespace
+- **Grafana** → <http://localhost:8093> — login **`admin`** / **`admin`**; browse the prebuilt *Kubernetes / Compute Resources* dashboards
+- **Prometheus** → <http://localhost:8094> — raw metrics / PromQL query UI
 
 > Goldilocks needs a few minutes of metrics history before recommendations appear.
 > If a workload shows no data, give it a moment and refresh.
@@ -91,10 +98,16 @@ Goldilocks to generate recommendations for everything in it.
 | Headlamp | `headlamp` | Helm (`headlamp/headlamp`) |
 | VPA recommender | `vpa` | Helm (`fairwinds-stable/vpa`, recommender-only) |
 | Goldilocks (controller + dashboard) | `goldilocks` | Helm (`fairwinds-stable/goldilocks`) |
+| Prometheus + Grafana + node-exporter + kube-state-metrics | `monitoring` | Helm (`prometheus-community/kube-prometheus-stack`) |
 
 > **Why recommender-only VPA?** The VPA admission-controller/updater rely on a
 > webhook-certificate hook that is flaky on minikube. Goldilocks only needs the
 > **recommender**, so we disable the rest for a clean, reliable install.
+
+> **kube-prometheus-stack tuning.** For a laptop-friendly footprint the chart is
+> installed with **Alertmanager disabled**, **2-day retention**, and a capped
+> Prometheus memory request/limit. Grafana uses a fixed local password
+> (`admin`/`admin`) — fine for a local playground, never for a real cluster.
 
 ---
 
@@ -111,6 +124,8 @@ Ports (edit at the top of `dashboards.sh` if they clash):
 
 - Headlamp → `8091`
 - Goldilocks → `8092`
+- Grafana → `8093`
+- Prometheus → `8094`
 
 ---
 
@@ -131,6 +146,7 @@ It appears in Headlamp immediately; Goldilocks picks it up within a few minutes.
 helm uninstall headlamp -n headlamp
 helm uninstall goldilocks -n goldilocks
 helm uninstall vpa -n vpa
+helm uninstall monitoring -n monitoring
 kubectl delete -f demo-workloads.yaml
 minikube stop                   # or: minikube delete  (removes the cluster)
 ```
